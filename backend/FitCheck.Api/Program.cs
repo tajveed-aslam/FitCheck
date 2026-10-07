@@ -63,7 +63,11 @@ builder.Services.AddProblemDetails();
 builder.Services.AddControllers()
     .AddJsonOptions(o => JsonDefaults.Configure(o.JsonSerializerOptions));
 
-var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
+// Browsers send Origin without a trailing slash; tolerate one (or stray spaces) in the configured value.
+var corsOrigins = (builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [])
+    .Select(o => o.Trim().TrimEnd('/'))
+    .Where(o => o.Length > 0)
+    .ToArray();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod()));
 
 builder.Services.AddEndpointsApiExplorer();
