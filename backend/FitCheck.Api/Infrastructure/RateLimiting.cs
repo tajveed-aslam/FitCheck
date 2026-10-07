@@ -5,27 +5,28 @@ using FitCheck.Api.Options;
 using FitCheck.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 
 namespace FitCheck.Api.Infrastructure;
 
-/// <summary>Protects the LLM quota on a public demo: per-user generation limits and per-IP guest sign-ups.</summary>
+/// <summary>
+/// Protects a public demo: a coarse per-user cap on upload requests and per-IP guest sign-ups (middleware
+/// policies), plus <see cref="AnalysisQuota"/> for the LLM itself.
+/// </summary>
 public static class RateLimiting
 {
-    public const string AnalysisPolicy = "analysis";
+    public const string UploadPolicy = "upload";
     public const string GuestSessionPolicy = "guest-session";
 
     public static IServiceCollection AddAppRateLimiting(this IServiceCollection services, DemoOptions demo)
     {
+        services.AddSingleton<AnalysisQuota>();
         services.AddRateLimiter(options =>
         {
-            options.AddPolicy(AnalysisPolicy, context =>
-            {
-                var userId = context.User.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? ClientIp(context);
-                var isGuest = context.User.HasClaim(AppClaims.Guest, "true");
-                return RateLimitPartition.GetFixedWindowLimiter(
-                    $"analysis:{userId}",
-                    _ => HourlyWindow(isGuest ? demo.GuestAnalysesPerHour : demo.UserAnalysesPerHour));
-            });
+            options.AddPolicy(UploadPolicy, context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    $"upload:{context.User.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? ClientIp(context)}",
+                    _ => HourlyWindow(demo.UploadsPerHour)));
 
             options.AddPolicy(GuestSessionPolicy, context =>
                 RateLimitPartition.GetFixedWindowLimiter(
@@ -51,7 +52,7 @@ public static class RateLimiting
         return services;
     }
 
-    private static FixedWindowRateLimiterOptions HourlyWindow(int permits) => new()
+    internal static FixedWindowRateLimiterOptions HourlyWindow(int permits) => new()
     {
         PermitLimit = Math.Max(permits, 1),
         Window = TimeSpan.FromHours(1),
@@ -60,4 +61,35 @@ public static class RateLimiting
 
     private static string ClientIp(HttpContext context) =>
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+}
+
+/// <summary>
+/// Hourly LLM quota per user (guests stricter). Taken only once a request has passed validation, so a visitor
+/// who picks the wrong file a few times isn't locked out without ever reaching the model.
+/// </summary>
+public sealed class AnalysisQuota(IOptions<DemoOptions> options) : IDisposable
+{
+    private readonly PartitionedRateLimiter<ClaimsPrincipal> _limiter =
+        PartitionedRateLimiter.Create<ClaimsPrincipal, string>(user =>
+        {
+            var isGuest = user.HasClaim(AppClaims.Guest, "true");
+            var demo = options.Value;
+            return RateLimitPartition.GetFixedWindowLimiter(
+                user.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? "anonymous",
+                _ => RateLimiting.HourlyWindow(isGuest ? demo.GuestAnalysesPerHour : demo.UserAnalysesPerHour));
+        });
+
+    /// <exception cref="QuotaExceededException">The user has used up this hour's analyses.</exception>
+    public void Take(ClaimsPrincipal user)
+    {
+        using var lease = _limiter.AttemptAcquire(user);
+        if (lease.IsAcquired)
+            return;
+
+        lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter);
+        throw new QuotaExceededException(
+            "You've used all of this hour's analyses for the demo. Please try again later.", retryAfter);
+    }
+
+    public void Dispose() => _limiter.Dispose();
 }

@@ -47,8 +47,11 @@ public sealed class DemoOptions
     public bool GuestAccessEnabled { get; set; } = true;
     public int GuestTokenMinutes { get; set; } = 120;
     public int GuestSessionsPerHourPerIp { get; set; } = 5;
+    /// <summary>AI analyses (the LLM quota). Rejected uploads don't count.</summary>
     public int GuestAnalysesPerHour { get; set; } = 5;
     public int UserAnalysesPerHour { get; set; } = 30;
+    /// <summary>Coarse cap on upload requests of any outcome, against spam.</summary>
+    public int UploadsPerHour { get; set; } = 60;
 }
 
 public sealed class AnalysisOptions

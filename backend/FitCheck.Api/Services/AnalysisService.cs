@@ -9,6 +9,9 @@ namespace FitCheck.Api.Services;
 
 public sealed record AnalysisInput(string FileName, byte[] FileContent, string JobDescription, string? Title);
 
+/// <summary>Validated input with the CV text already extracted: everything needed for the LLM call.</summary>
+public sealed record PreparedAnalysis(string FileName, string CvText, string JobDescription, string? Title);
+
 public sealed record AnalysisOutcome(
     string Title,
     string? Company,
@@ -21,15 +24,22 @@ public sealed record AnalysisOutcome(
 
 public interface IAnalysisService
 {
-    Task<AnalysisOutcome> AnalyzeAsync(AnalysisInput input, CancellationToken cancellationToken);
+    /// <summary>Validates the input and extracts the CV text. Cheap; never calls the LLM.</summary>
+    /// <exception cref="InputValidationException">The file or job description can't be used.</exception>
+    PreparedAnalysis Prepare(AnalysisInput input);
+
+    Task<AnalysisOutcome> AnalyzeAsync(PreparedAnalysis prepared, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Split into Prepare and Analyze so callers can spend LLM quota only on requests that are actually valid.
+/// </summary>
 public sealed class AnalysisService(ILlmClient llm, IOptions<AnalysisOptions> options) : IAnalysisService
 {
     private const int MaxTitleLength = 200;
     private const int MaxFileNameLength = 255;
 
-    public async Task<AnalysisOutcome> AnalyzeAsync(AnalysisInput input, CancellationToken cancellationToken)
+    public PreparedAnalysis Prepare(AnalysisInput input)
     {
         var opts = options.Value;
         var jobDescription = ValidateJobDescription(input.JobDescription, opts);
@@ -46,17 +56,23 @@ public sealed class AnalysisService(ILlmClient llm, IOptions<AnalysisOptions> op
         if (cvText.Length > opts.MaxCvChars)
             cvText = cvText[..opts.MaxCvChars];
 
+        return new PreparedAnalysis(
+            Truncate(Path.GetFileName(input.FileName), MaxFileNameLength), cvText, jobDescription, input.Title);
+    }
+
+    public async Task<AnalysisOutcome> AnalyzeAsync(PreparedAnalysis prepared, CancellationToken cancellationToken)
+    {
         var stopwatch = Stopwatch.StartNew();
         var raw = await llm.CompleteAsync(
-            Prompts.MatchSystem, Prompts.MatchUser(jobDescription, cvText), jsonMode: true, cancellationToken);
-        var result = MatchResultParser.Parse(raw, cvText);
+            Prompts.MatchSystem, Prompts.MatchUser(prepared.JobDescription, prepared.CvText), jsonMode: true, cancellationToken);
+        var result = MatchResultParser.Parse(raw, prepared.CvText);
 
         return new AnalysisOutcome(
-            Title: Truncate(FirstNonBlank(input.Title, result.JobTitle, "Untitled role"), MaxTitleLength),
+            Title: Truncate(FirstNonBlank(prepared.Title, result.JobTitle, "Untitled role"), MaxTitleLength),
             Company: result.Company is null ? null : Truncate(result.Company, MaxTitleLength),
-            FileName: Truncate(Path.GetFileName(input.FileName), MaxFileNameLength),
-            CvText: cvText,
-            JobDescription: jobDescription,
+            FileName: prepared.FileName,
+            CvText: prepared.CvText,
+            JobDescription: prepared.JobDescription,
             Result: result,
             Model: llm.Model,
             DurationMs: (int)stopwatch.ElapsedMilliseconds);

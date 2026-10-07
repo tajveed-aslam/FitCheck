@@ -17,8 +17,11 @@ namespace FitCheck.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/analyses")]
-public sealed class AnalysesController(AppDbContext db, IAnalysisService analyzer, IOptions<AnalysisOptions> options)
-    : ControllerBase
+public sealed class AnalysesController(
+    AppDbContext db,
+    IAnalysisService analyzer,
+    AnalysisQuota quota,
+    IOptions<AnalysisOptions> options) : ControllerBase
 {
     private const int HistoryLimit = 100;
     // Generous outer cap for the multipart body; the per-file limit is enforced from AnalysisOptions.
@@ -28,7 +31,7 @@ public sealed class AnalysesController(AppDbContext db, IAnalysisService analyze
 
     [HttpPost]
     [Consumes("multipart/form-data")]
-    [EnableRateLimiting(RateLimiting.AnalysisPolicy)]
+    [EnableRateLimiting(RateLimiting.UploadPolicy)]
     [RequestSizeLimit(MaxRequestBytes)]
     [RequestFormLimits(MultipartBodyLengthLimit = MaxRequestBytes)]
     [ProducesResponseType<AnalysisDto>(StatusCodes.Status201Created)]
@@ -49,8 +52,10 @@ public sealed class AnalysesController(AppDbContext db, IAnalysisService analyze
             content = buffer.ToArray();
         }
 
-        var outcome = await analyzer.AnalyzeAsync(
-            new AnalysisInput(file.FileName, content, request.JobDescription, request.Title), cancellationToken);
+        // Validate and extract first; only a request that will really reach the LLM spends quota.
+        var prepared = analyzer.Prepare(new AnalysisInput(file.FileName, content, request.JobDescription, request.Title));
+        quota.Take(User);
+        var outcome = await analyzer.AnalyzeAsync(prepared, cancellationToken);
 
         var analysis = new Analysis
         {
