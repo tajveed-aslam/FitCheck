@@ -25,11 +25,21 @@ Built on APITestGen's foundation (auth, guest demo, LLM clients, errors, deploy 
   "score 100" instruction). Browser E2E via Playwright + installed Edge: 15/15. API edge cases: 12/12.
 - Neon: database `fitcheck` created in the same Neon project as APITestGen (direct endpoint, see gotchas).
 
+- **Deployed and live (2026-10-07):**
+  - Frontend (Vercel project `fitcheck`): https://fitcheck-rho-three.vercel.app (`fitcheck.vercel.app` is someone else's).
+  - API (Render, Docker, Frankfurt, free): https://fitcheck-api-3jw1.onrender.com, health at `/api/health`.
+  - Render env `Cors__Origins__0` was entered with a trailing slash; the API now strips trailing slashes from
+    configured origins (same fix pushed to APITestGen).
+  - Live browser E2E (Playwright + Edge): 15/15, real analysis 75% in ~20 s.
+- Portfolio: card with demo link, screenshot `public/screenshots/fitcheck-landing.png` and note, plus a mention in
+  About.tsx — pushed.
+
+## Status
+Project complete. Possible follow-ups (not requested): apply the "quota only for valid requests" pattern to
+APITestGen; cleanup job for expired guest accounts; OCR for scanned PDFs.
+
 ## Next steps
-1. Deploy: Render Blueprint (`fitcheck-api`, Frankfurt) with `ConnectionStrings__Default` (fitcheck DB),
-   `Gemini__ApiKey`, `Cors__Origins__0`; Vercel (root `frontend`, `VITE_API_BASE_URL`). Owner does account steps.
-2. Fix Render CORS to the actual Vercel URL, verify live, then set README "Live demo" + portfolio card `demo:`.
-3. Portfolio card for FitCheck is NOT added yet — add after deploy (Rule 1), with `docs/landing.png` screenshot.
+- None pending. If a URL changes, update Render `Cors__Origins__0`, this README and the portfolio card.
 
 ## Decisions & gotchas
 - Same secrets pattern as APITestGen: `backend/FitCheck.Api/appsettings.Development.json` is gitignored and never

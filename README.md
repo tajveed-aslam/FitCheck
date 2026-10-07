@@ -10,7 +10,9 @@ FitCheck returns:
 
 Every analysis is saved to your personal history.
 
-**Live demo:** _coming soon_ · No sign-up needed: click **Try the live demo**, then **Try with sample CV & job**.
+**Live demo: https://fitcheck-rho-three.vercel.app** · No sign-up needed: click **Try the live demo**, then
+**Try with sample CV & job**. The API runs on a free tier that sleeps when idle, so the first visit can take up to a
+minute to wake.
 
 ![FitCheck result page](docs/result.png)
 
