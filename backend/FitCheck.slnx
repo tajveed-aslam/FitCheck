@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="FitCheck.Api/FitCheck.Api.csproj" />
+  <Project Path="FitCheck.Tests/FitCheck.Tests.csproj" />
+</Solution>
